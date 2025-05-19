@@ -1,4 +1,9 @@
-Flask
+flask
 yt-dlp
-Flask-Cors
-ffmpeg-python
+pillow
+cloudinary
+firebase-admin
+python-dotenv
+gunicorn
+requests
+urllib3
