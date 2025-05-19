@@ -582,6 +582,7 @@ def api_download_file():
             file_path,
             as_attachment=True,
             download_name=os.path.basename(file_path)
+        )
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
