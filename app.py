@@ -1,37 +1,44 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import yt_dlp
-import uuid
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})  # Allow all origins; customize as needed
+CORS(app)
+
+conversion_factors = {
+    'meter': 1.0,
+    'kilometer': 1000.0,
+    'foot': 0.3048,
+    'mile': 1609.34
+}
+
 
 @app.route('/')
-def index():
-    return '✅ yt-dlp API is running!'
+def home():
+    return "Unit Converter API is running."
 
-@app.route('/download', methods=['POST', 'OPTIONS'])
-def download_video():
-    if request.method == 'OPTIONS':
-        # Preflight request response (CORS)
-        return '', 204
 
-    data = request.get_json()
-    url = data.get('url')
-    if not url:
-        return jsonify({'error': 'No URL provided'}), 400
+@app.route('/convert', methods=['GET'])
+def convert():
+    from_unit = request.args.get('from')
+    to_unit = request.args.get('to')
+    value = request.args.get('value', type=float)
 
-    filename = f"{uuid.uuid4()}.mp4"
+    if from_unit not in conversion_factors or to_unit not in conversion_factors:
+        return jsonify({'error': 'Invalid units'}), 400
+    if value is None:
+        return jsonify({'error': 'Missing value'}), 400
 
-    ydl_opts = {
-        'format': 'best',
-        'outtmpl': filename,
-        'quiet': True
-    }
+    # Convert to meters first, then to target unit
+    value_in_meters = value * conversion_factors[from_unit]
+    converted_value = value_in_meters / conversion_factors[to_unit]
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        return jsonify({'message': 'Downloaded', 'file': filename})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'from': from_unit,
+        'to': to_unit,
+        'input': value,
+        'result': converted_value
+    })
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
