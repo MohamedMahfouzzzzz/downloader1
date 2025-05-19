@@ -1,46 +1,40 @@
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+import yt_dlp
+import tempfile
 
 app = Flask(__name__)
 CORS(app)
 
-conversion_factors = {
-    'meter': 1.0,
-    'kilometer': 1000.0,
-    'foot': 0.3048,
-    'mile': 1609.34
-}
-
-
 @app.route('/')
 def home():
-    return "Unit Converter API is running."
+    return "YT-DLP Video Downloader API is running."
 
+@app.route('/download', methods=['POST'])
+def download_video():
+    data = request.get_json()
+    if not data or 'url' not in data:
+        return jsonify({'error': 'Missing URL in request body'}), 400
 
-@app.route('/convert', methods=['GET'])
-def convert():
-    from_unit = request.args.get('from')
-    to_unit = request.args.get('to')
-    value = request.args.get('value', type=float)
+    url = data['url']
+    ydl_opts = {
+        'format': 'best',
+        'outtmpl': tempfile.gettempdir() + '/%(title)s.%(ext)s',
+        'noplaylist': True,
+        'quiet': True,
+    }
 
-    if from_unit not in conversion_factors or to_unit not in conversion_factors:
-        return jsonify({'error': 'Invalid units'}), 400
-    if value is None:
-        return jsonify({'error': 'Missing value'}), 400
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
 
-    # Convert to meters first, then to target unit
-    value_in_meters = value * conversion_factors[from_unit]
-    converted_value = value_in_meters / conversion_factors[to_unit]
+        # Send the downloaded file to client
+        return send_file(filename, as_attachment=True)
 
-    return jsonify({
-        'from': from_unit,
-        'to': to_unit,
-        'input': value,
-        'result': converted_value
-    })
-
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
-
