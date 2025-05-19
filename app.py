@@ -1,3 +1,5 @@
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 import os
 import urllib.request
 from io import BytesIO
@@ -13,11 +15,11 @@ import cloudinary.api
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime
-from flask import Flask, request, jsonify, send_file
-from werkzeug.utils import secure_filename
 import threading
 
+# Initialize Flask app with CORS
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all domains on all routes
 
 # Initialize Firebase
 def initialize_firebase():
@@ -38,7 +40,6 @@ cloudinary.config(
     api_secret="Vq7zyHPuHDl0zytJlW8igCdEPL4"
 )
 
-# Utility functions
 def sanitize(filename):
     """Sanitize the filename to remove invalid characters."""
     filename = re.sub(r'[<>:"/\\|?*]', '', filename)
@@ -478,10 +479,17 @@ def check_waiting_songs(folder_path):
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
 
-# API Endpoints
-@app.route('/api/download', methods=['POST'])
+@app.route('/api/download', methods=['POST', 'OPTIONS'])
 def api_download():
-    data = request.json
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'status': 'success'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Methods', 'POST')
+        return response
+    
+    data = request.get_json()
     if not data:
         return jsonify({'status': 'error', 'message': 'No data provided'}), 400
     
@@ -500,16 +508,36 @@ def api_download():
         youtube_url = url
     
     result = download_mp3_and_thumbnail(youtube_url, folder_path)
-    return jsonify(result)
+    response = jsonify(result)
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
 
-@app.route('/api/check_waiting', methods=['POST'])
+@app.route('/api/check_waiting', methods=['POST', 'OPTIONS'])
 def api_check_waiting():
-    folder_path = request.json.get('folder_path', os.path.join(os.getcwd(), "YouTube_Downloads"))
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'status': 'success'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Methods', 'POST')
+        return response
+    
+    folder_path = request.get_json().get('folder_path', os.path.join(os.getcwd(), "YouTube_Downloads"))
     result = check_waiting_songs(folder_path)
-    return jsonify(result)
+    response = jsonify(result)
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
 
-@app.route('/api/download_file', methods=['GET'])
+@app.route('/api/download_file', methods=['GET', 'OPTIONS'])
 def api_download_file():
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'status': 'success'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Methods', 'GET')
+        return response
+    
     file_path = request.args.get('path')
     if not file_path or not os.path.exists(file_path):
         return jsonify({'status': 'error', 'message': 'File not found'}), 404
@@ -519,7 +547,6 @@ def api_download_file():
             file_path,
             as_attachment=True,
             download_name=os.path.basename(file_path)
-        )
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -533,9 +560,7 @@ def background_task():
             print(f"Background task error: {e}")
         time.sleep(60 * 5)  # Check every 5 minutes
 
-# Start background thread when app starts
 if __name__ == '__main__':
+    # Start background thread when app starts
     threading.Thread(target=background_task, daemon=True).start()
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
-else:
-    threading.Thread(target=background_task, daemon=True).start()
