@@ -1,17 +1,21 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS  # import CORS
+from flask_cors import CORS
 import yt_dlp
 import uuid
 
 app = Flask(__name__)
-CORS(app)  # enable CORS for all routes
+CORS(app, resources={r"/*": {"origins": "*"}})  # Allow all origins; customize as needed
 
 @app.route('/')
 def index():
     return '✅ yt-dlp API is running!'
 
-@app.route('/download', methods=['POST'])
+@app.route('/download', methods=['POST', 'OPTIONS'])
 def download_video():
+    if request.method == 'OPTIONS':
+        # Preflight request response (CORS)
+        return '', 204
+
     data = request.get_json()
     url = data.get('url')
     if not url:
