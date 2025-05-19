@@ -1,4 +1,4 @@
-flask
-flask-cors
+Flask
 yt-dlp
-gunicorn
+Flask-Cors
+ffmpeg-python
