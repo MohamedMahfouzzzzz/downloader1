@@ -247,6 +247,39 @@ def download_webm_and_thumbnail(url, folder_path=None, doc_id=None):
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
 
+def add_to_firestore(song_data, collection_name='recommendedSongs'):
+    """Add song data to Firestore collection"""
+    if not db:
+        print("Firestore not initialized, skipping Firestore update")
+        return False
+    
+    try:
+        if 'createdAt' not in song_data:
+            song_data['createdAt'] = datetime.now()
+        
+        doc_ref = db.collection(collection_name).document()
+        doc_ref.set(song_data)
+        print(f"Added song to Firestore with ID: {doc_ref.id}")
+        return True
+    except Exception as e:
+        print(f"Error adding to Firestore: {e}")
+        return False
+
+def update_waiting_document(doc_id, updates):
+    """Update a document in the waiting collection"""
+    if not db:
+        print("Firestore not initialized, skipping update")
+        return False
+    
+    try:
+        print(f"Updating document {doc_id} with: {updates}")
+        db.collection('waiting').document(doc_id).update(updates)
+        print(f"Successfully updated waiting document {doc_id}")
+        return True
+    except Exception as e:
+        print(f"Error updating waiting document {doc_id}: {e}")
+        return False
+
 def check_waiting_songs(folder_path):
     """Check Firestore waiting collection for songs to download"""
     if not db:
@@ -368,7 +401,7 @@ def api_download_file():
         return send_file(
             file_path,
             as_attachment=True,
-            download_name=os.path.basename(file_path)
+            download_name=os.path.basename(file_path))
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
