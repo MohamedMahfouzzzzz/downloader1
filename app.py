@@ -170,7 +170,7 @@ def search_youtube_music(query):
         print(f"Search error: {e}")
     return None
 
-def download_webm_and_thumbnail(url, folder_path=None, doc_id=None):
+def download_audio_and_thumbnail(url, folder_path=None, doc_id=None):
     try:
         ydl_opts_info = {
             'quiet': True,
@@ -215,35 +215,13 @@ def download_webm_and_thumbnail(url, folder_path=None, doc_id=None):
             folder_path = os.path.join(os.getcwd(), "YouTube_Downloads")
         os.makedirs(folder_path, exist_ok=True)
 
-        # Modified to download WebM directly without conversion
-        ydl_opts_download = {
-            'format': 'bestaudio[ext=webm]',  # Prefer WebM format
-            'outtmpl': os.path.join(folder_path, f"{title}.%(ext)s"),
-            'retries': 10,
-            'fragment_retries': 10,
-            'skip_unavailable_fragments': True,
-            'ignoreerrors': True,
-            'quiet': True,
-            'no_warnings': False,
-            'extractor_args': {
-                'youtube': {
-                    'skip': ['dash', 'hls', 'mhtml'],
-                    'player_client': ['android', 'web']
-                }
-            },
-            'compat_opts': {
-                'youtube-dl': True,
-                'no-youtube-unavailable-videos': True
-            },
-            'headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Referer': 'https://www.youtube.com/',
-            },
-            'noplaylist': True,
-            'geo_bypass': True,
-            'geo_bypass_country': 'US',
-        }
+        # Try multiple format options in order of preference
+        format_options = [
+            'bestaudio[ext=webm]',  # First try WebM
+            'bestaudio[ext=opus]',   # Then Opus
+            'bestaudio/best',        # Then any audio format
+            'worstaudio/worst'      # Finally, as a last resort
+        ]
 
         max_attempts = 3
         user_agents = [
@@ -252,29 +230,80 @@ def download_webm_and_thumbnail(url, folder_path=None, doc_id=None):
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         ]
 
-        for attempt in range(max_attempts):
-            try:
-                ydl_opts_download['headers']['User-Agent'] = user_agents[attempt % len(user_agents)]
-                with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
-                    ydl.download([url])
-                break
-            except Exception as e:
-                if attempt == max_attempts - 1:
-                    raise
-                time.sleep(2)
+        audio_path = None
+        audio_type = None
+        last_error = None
 
-        # Find the downloaded file (could be .webm or .opus)
-        downloaded_files = [f for f in os.listdir(folder_path) if f.startswith(title)]
-        if not downloaded_files:
-            raise FileNotFoundError(f"No audio file found for {title}")
+        for format_option in format_options:
+            for attempt in range(max_attempts):
+                try:
+                    ydl_opts_download = {
+                        'format': format_option,
+                        'outtmpl': os.path.join(folder_path, f"{title}.%(ext)s"),
+                        'retries': 10,
+                        'fragment_retries': 10,
+                        'skip_unavailable_fragments': True,
+                        'ignoreerrors': True,
+                        'quiet': True,
+                        'no_warnings': False,
+                        'extractor_args': {
+                            'youtube': {
+                                'skip': ['dash', 'hls', 'mhtml'],
+                                'player_client': ['android', 'web']
+                            }
+                        },
+                        'compat_opts': {
+                            'youtube-dl': True,
+                            'no-youtube-unavailable-videos': True
+                        },
+                        'headers': {
+                            'User-Agent': user_agents[attempt % len(user_agents)],
+                            'Accept-Language': 'en-US,en;q=0.5',
+                            'Referer': 'https://www.youtube.com/',
+                        },
+                        'noplaylist': True,
+                        'geo_bypass': True,
+                        'geo_bypass_country': 'US',
+                    }
+
+                    with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
+                        ydl.download([url])
+
+                    # Find the downloaded file
+                    downloaded_files = [f for f in os.listdir(folder_path) 
+                                     if f.startswith(title) and not f.endswith('.part')]
+                    
+                    if downloaded_files:
+                        audio_path = os.path.join(folder_path, downloaded_files[0])
+                        ext = os.path.splitext(audio_path)[1].lower()
+                        
+                        # Determine audio type based on extension
+                        if ext == '.webm':
+                            audio_type = 'audio/webm'
+                        elif ext == '.opus':
+                            audio_type = 'audio/opus'
+                        elif ext == '.m4a':
+                            audio_type = 'audio/mp4'
+                        elif ext == '.mp3':
+                            audio_type = 'audio/mpeg'
+                        else:
+                            audio_type = 'audio/x-' + ext[1:]  # Generic type
+                        
+                        break  # Successfully downloaded
+                
+                except Exception as e:
+                    last_error = str(e)
+                    if attempt == max_attempts - 1:
+                        print(f"Failed to download with format {format_option}: {last_error}")
+                    time.sleep(2)
             
-        audio_path = os.path.join(folder_path, downloaded_files[0])
-        audio_ext = os.path.splitext(audio_path)[1].lower()
-        
-        if audio_ext not in ['.webm', '.opus']:
-            raise ValueError(f"Unexpected audio format: {audio_ext}")
-            
-        audio_type = 'audio/webm' if audio_ext == '.webm' else 'audio/opus'
+            if audio_path and os.path.exists(audio_path):
+                break  # Move on to processing if we have the audio file
+
+        if not audio_path or not os.path.exists(audio_path):
+            error_msg = f"No audio file could be downloaded. Last error: {last_error}"
+            print(error_msg)
+            return {'status': 'error', 'message': error_msg}
 
         result = {
             'status': 'success',
@@ -286,9 +315,11 @@ def download_webm_and_thumbnail(url, folder_path=None, doc_id=None):
                 'thumbnail': None,
                 'm3ew': None
             },
-            'cloudinary_url': None
+            'cloudinary_url': None,
+            'audio_type': audio_type
         }
 
+        # Process thumbnail and create M3EW file
         if thumbnail_url:
             try:
                 opener = urllib.request.build_opener()
@@ -457,7 +488,7 @@ def check_waiting_songs(folder_path):
             url = search_youtube_music(song_name)
             
             if url:
-                result = download_webm_and_thumbnail(url, folder_path, doc.id)
+                result = download_audio_and_thumbnail(url, folder_path, doc.id)
                 results.append({
                     'doc_id': doc.id,
                     'song_name': song_name,
@@ -511,7 +542,7 @@ def api_download():
     else:
         youtube_url = url
     
-    result = download_webm_and_thumbnail(youtube_url, folder_path)
+    result = download_audio_and_thumbnail(youtube_url, folder_path)
     response = jsonify(result)
     response.headers.add('Access-Control-Allow-Origin', '*')
     return response
@@ -551,7 +582,6 @@ def api_download_file():
             file_path,
             as_attachment=True,
             download_name=os.path.basename(file_path)
-        )
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
