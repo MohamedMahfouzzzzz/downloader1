@@ -5,7 +5,6 @@ from PIL import Image
 from flask import Flask, request, jsonify
 import yt_dlp
 import threading
-from flask_cors import CORS
 import time
 import json
 import random
@@ -15,6 +14,14 @@ import tempfile
 import shutil
 
 app = Flask(__name__)
+
+# Add CORS headers to all responses
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
 
 def sanitize(filename):
     """Sanitize the filename to remove invalid characters."""
@@ -257,20 +264,27 @@ def download_mp3_and_thumbnail(url, song_name, temp_dir):
 # API Endpoints
 @app.route('/')
 def index():
-    return "YouTube Music Downloader API is running!"
+    response = jsonify("YouTube Music Downloader API is running!")
+    return response
 
-@app.route('/api/download', methods=['POST'])
+@app.route('/api/download', methods=['POST', 'OPTIONS'])
 def download_song():
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        return response
+    
     """Download a song by name and return audio and thumbnail data"""
     try:
         data = request.get_json()
         song_name = data.get('song_name', '').strip()
         
         if not song_name:
-            return jsonify({
+            response = jsonify({
                 'success': False,
                 'message': 'Please provide a song name'
-            }), 400
+            })
+            return response, 400
         
         # Create temporary directory
         temp_dir = tempfile.mkdtemp()
@@ -280,10 +294,11 @@ def download_song():
         
         if not url:
             shutil.rmtree(temp_dir, ignore_errors=True)
-            return jsonify({
+            response = jsonify({
                 'success': False,
                 'message': 'No results found for your search'
-            }), 404
+            })
+            return response, 404
         
         # Download and process the song
         result = download_mp3_and_thumbnail(url, song_name, temp_dir)
@@ -304,7 +319,7 @@ def download_song():
             # Clean up temp directory
             shutil.rmtree(temp_dir, ignore_errors=True)
             
-            return jsonify({
+            response = jsonify({
                 'success': True,
                 'title': result['title'],
                 'artist': result['artist'],
@@ -315,33 +330,33 @@ def download_song():
                 'image_type': 'image/png' if image_data else None,
                 'source': 'YouTube'
             })
+            return response
         else:
             shutil.rmtree(temp_dir, ignore_errors=True)
-            return jsonify({
+            response = jsonify({
                 'success': False,
                 'message': result.get('error', 'Unknown error occurred')
-            }), 500
+            })
+            return response, 500
     except Exception as e:
-        return jsonify({
+        response = jsonify({
             'success': False,
             'message': f"Server error: {str(e)}"
-        }), 500
+        })
+        return response, 500
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    return jsonify({
+    response = jsonify({
         'status': 'healthy',
         'timestamp': time.time()
     })
+    return response
 
 # For PythonAnywhere
 application = app
 
-CORS(app)
-
-
 if __name__ == '__main__':
     # Start background tasks if any
     threading.Thread(target=lambda: print("Background task placeholder"), daemon=True).start()
-    
