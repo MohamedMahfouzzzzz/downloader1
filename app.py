@@ -23,7 +23,7 @@ app = Flask(__name__)
 # Initialize Firebase
 db = None
 try:
-    cred_path = os.path.expanduser('~/firebase-credentials.json')
+    cred_path = os.path.expanduser('firebase-credentials.json')
     if os.path.exists(cred_path):
         cred = credentials.Certificate(cred_path)
         firebase_admin.initialize_app(cred)
