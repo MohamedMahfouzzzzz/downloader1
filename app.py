@@ -5,6 +5,7 @@ from PIL import Image
 from flask import Flask, request, jsonify
 import yt_dlp
 import threading
+from flask_cors import CORS
 import time
 import json
 import random
@@ -337,6 +338,10 @@ def health_check():
 # For PythonAnywhere
 application = app
 
+CORS(app)
+
+
 if __name__ == '__main__':
     # Start background tasks if any
     threading.Thread(target=lambda: print("Background task placeholder"), daemon=True).start()
+    
