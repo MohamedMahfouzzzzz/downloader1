@@ -1,9 +1,9 @@
-flask
-flask-cors
+flask==3.1.2
+flask-cors==6.0.1
 yt-dlp==2025.4.30
-Pillow==10.1.0
+Pillow==10.3.0
 cloudinary==1.37.0
-firebase-admin==6.8.0
+firebase-admin==7.1.0
 python-dotenv==1.1.0
 gunicorn==23.0.0
 requests==2.31.0
