@@ -597,6 +597,15 @@ def background_task():
         time.sleep(60 * 5)  # Check every 5 minutes
 
 if __name__ == '__main__':
-    # Start background thread when app starts
+    # Add a simple home route for health check
+    @app.route('/')
+    def home():
+        return jsonify({"status": "ok", "message": "YouTube Downloader API is running"})
+
+    # Start background thread for checking waiting songs
     threading.Thread(target=background_task, daemon=True).start()
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    
+    # Start Flask app
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
+
