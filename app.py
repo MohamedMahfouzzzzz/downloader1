@@ -9,41 +9,11 @@ import time
 import json
 import random
 import re
-import cloudinary
-import cloudinary.uploader
-import cloudinary.api
-import firebase_admin
-from firebase_admin import credentials, firestore
-from datetime import datetime
-import hashlib
 import warnings
+import tempfile
+import shutil
 
 app = Flask(__name__)
-
-# Initialize Firebase
-db = None
-try:
-    cred_path = os.path.expanduser('firebase-credentials.json')
-    if os.path.exists(cred_path):
-        cred = credentials.Certificate(cred_path)
-        firebase_admin.initialize_app(cred)
-        db = firestore.client()
-        print("Firebase initialized successfully")
-    else:
-        print("Firebase credentials file not found")
-except Exception as e:
-    print(f"Firebase initialization error: {e}")
-
-# Configure Cloudinary
-try:
-    cloudinary.config(
-        cloud_name="dgp55b9vn",
-        api_key="738647756627725",
-        api_secret="Vq7zyHPuHDl0zytJlW8igCdEPL4"
-    )
-    print("Cloudinary configured successfully")
-except Exception as e:
-    print(f"Cloudinary configuration error: {e}")
 
 def sanitize(filename):
     """Sanitize the filename to remove invalid characters."""
@@ -53,101 +23,6 @@ def sanitize(filename):
     if not filename:
         filename = "Untitled_" + str(int(time.time()))
     return filename
-
-def sanitize_public_id(filename):
-    """Sanitize filename for Cloudinary public_id requirements"""
-    filename = re.sub(r'[^a-zA-Z0-9_.-]', '', filename)
-    filename = re.sub(r'[_\-\.]{2,}', '_', filename)
-    filename = filename.strip('-.')
-    filename = filename[:100]
-    if not filename:
-        filename = "file_" + str(int(time.time()))
-    return filename
-
-def generate_public_id(filename):
-    """Generate a safe public_id from filename"""
-    file_hash = hashlib.md5(filename.encode()).hexdigest()[:8]
-    safe_name = sanitize_public_id(filename)[:50]
-    return f"{safe_name}_{file_hash}"
-
-def create_m3ew_file(metadata, image_data, audio_data):
-    """Create an M3EW file from metadata, image and audio data."""
-    M3EW_HEADER = b"M3EW"
-    IMAGE_START_MARKER = b"IMG_START"
-    IMAGE_END_MARKER = b"IMG_END"
-    AUDIO_START_MARKER = b"AUDIO_START"
-    AUDIO_END_MARKER = b"AUDIO_END"
-    
-    metadata_str = json.dumps(metadata)
-    metadata_bytes = metadata_str.encode('utf-8')
-    metadata_length = len(metadata_bytes)
-    
-    header = bytearray(9)
-    header[0:4] = M3EW_HEADER
-    header[4] = metadata.get("version", 1)
-    header[5:9] = metadata_length.to_bytes(4, 'little')
-    
-    parts = [
-        header,
-        metadata_bytes,
-        IMAGE_START_MARKER,
-        image_data,
-        IMAGE_END_MARKER,
-        AUDIO_START_MARKER,
-        audio_data,
-        AUDIO_END_MARKER
-    ]
-    
-    return b''.join(parts)
-
-def upload_to_cloudinary(file_path, public_id=None):
-    """Upload file to Cloudinary and return secure URL."""
-    try:
-        file_size = os.path.getsize(file_path)
-        
-        if public_id:
-            public_id = generate_public_id(public_id)
-        
-        if file_size > 10 * 1024 * 1024:
-            response = cloudinary.uploader.upload_large(
-                file_path,
-                resource_type="raw",
-                public_id=public_id,
-                unique_filename=False,
-                overwrite=True,
-                chunk_size=20 * 1024 * 1024
-            )
-        else:
-            response = cloudinary.uploader.upload(
-                file_path,
-                resource_type="raw",
-                public_id=public_id,
-                unique_filename=False,
-                overwrite=True
-            )
-            
-        return response['secure_url']
-    except Exception as e:
-        print(f"Cloudinary upload error: {e}")
-        return None
-
-def add_to_firestore(song_data, collection_name='recommendedSongs'):
-    """Add song data to Firestore collection"""
-    if not db:
-        print("Firestore not initialized, skipping Firestore update")
-        return False
-    
-    try:
-        if 'createdAt' not in song_data:
-            song_data['createdAt'] = datetime.now()
-        
-        doc_ref = db.collection(collection_name).document()
-        doc_ref.set(song_data)
-        print(f"Added song to Firestore with ID: {doc_ref.id}")
-        return True
-    except Exception as e:
-        print(f"Error adding to Firestore: {e}")
-        return False
 
 def search_youtube_music(query):
     """Search YouTube Music and return the first video URL."""
@@ -185,13 +60,8 @@ def search_youtube_music(query):
         print(f"Search error: {e}")
     return None
 
-def download_mp3_and_thumbnail(url, song_name, folder_path=None):
+def download_mp3_and_thumbnail(url, song_name, temp_dir):
     try:
-        # Create download directory if it doesn't exist
-        if not folder_path:
-            folder_path = os.path.expanduser('~/YouTube_Downloads')
-        os.makedirs(folder_path, exist_ok=True)
-
         # Get video information
         ydl_opts_info = {
             'quiet': True,
@@ -225,7 +95,7 @@ def download_mp3_and_thumbnail(url, song_name, folder_path=None):
             'external_downloader_args': ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'],
             'youtube_include_dash_manifest': False,
             'youtube_include_hls_manifest': False,
-            'ffmpeg_location': '/usr/bin/ffmpeg',  # PythonAnywhere specific
+            'ffmpeg_location': '/usr/bin/ffmpeg',
         }
 
         with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
@@ -253,7 +123,7 @@ def download_mp3_and_thumbnail(url, song_name, folder_path=None):
         # Download audio
         ydl_opts_download = {
             'format': 'bestaudio/best',
-            'outtmpl': os.path.join(folder_path, f"{title}.%(ext)s"),
+            'outtmpl': os.path.join(temp_dir, f"{title}.%(ext)s"),
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -305,7 +175,7 @@ def download_mp3_and_thumbnail(url, song_name, folder_path=None):
             'keep_fragments': True,
             'fragment_retries': 20,
             'extract_flat': 'in_playlist',
-            'ffmpeg_location': '/usr/bin/ffmpeg',  # PythonAnywhere specific
+            'ffmpeg_location': '/usr/bin/ffmpeg',
         }
 
         max_attempts = 3
@@ -327,7 +197,8 @@ def download_mp3_and_thumbnail(url, song_name, folder_path=None):
                 print(f"Attempt {attempt + 1} failed, retrying...")
                 time.sleep(2)
 
-        mp3_path = os.path.join(folder_path, f"{title}.mp3")
+        mp3_path = os.path.join(temp_dir, f"{title}.mp3")
+        png_path = os.path.join(temp_dir, f"{title}.png")
         
         max_wait_time = 120 if duration > 3600 else 30
         wait_interval = 0.5
@@ -337,14 +208,13 @@ def download_mp3_and_thumbnail(url, song_name, folder_path=None):
             waited += wait_interval
 
         if not os.path.exists(mp3_path):
-            possible_files = [f for f in os.listdir(folder_path) if f.startswith(title)]
+            possible_files = [f for f in os.listdir(temp_dir) if f.startswith(title)]
             if possible_files:
-                mp3_path = os.path.join(folder_path, possible_files[0])
+                mp3_path = os.path.join(temp_dir, possible_files[0])
             else:
                 raise FileNotFoundError(f"Audio file not created at {mp3_path}")
 
         # Download thumbnail if available
-        image_data = b''
         if thumbnail_url:
             try:
                 opener = urllib.request.build_opener()
@@ -355,88 +225,27 @@ def download_mp3_and_thumbnail(url, song_name, folder_path=None):
                 img_data = response.read()
                 image = Image.open(BytesIO(img_data))
                 
-                png_path = os.path.join(folder_path, f"{title}.png")
-                jpg_path = os.path.join(folder_path, f"{title}.jpg")
-                
                 image.save(png_path, format="PNG")
-                image.save(jpg_path, format="JPEG", quality=95)
-                
-                with open(png_path, 'rb') as f:
-                    image_data = f.read()
             except Exception as e:
                 print(f"Error downloading thumbnail: {e}")
-
-        # Create M3EW file
-        with open(mp3_path, 'rb') as f:
-            audio_data = f.read()
+                png_path = None
         
-        metadata = {
-            "title": original_title,
-            "artist": info.get("uploader", "Unknown Artist"),
-            "audioType": "audio/mpeg",
-            "imageType": "image/png" if image_data else None,
-            "duration": duration_str,
-            "source": "YouTube",
-            "createdAt": datetime.now().isoformat(),
-            "version": 1,
-            "isLive": is_live,
-            "wasLive": was_live
+        return {
+            'success': True,
+            'title': original_title,
+            'artist': info.get("uploader", "Unknown Artist"),
+            'duration': duration_str,
+            'mp3_path': mp3_path,
+            'png_path': png_path,
+            'source': 'YouTube',
+            'thumbnailUrl': thumbnail_url if thumbnail_url else None,
+            'status': 'completed',
+            'audioType': 'audio/mpeg',
+            'imageType': 'image/png' if png_path else None,
+            'version': 1,
+            'isLive': is_live,
+            'wasLive': was_live
         }
-        
-        m3ew_data = create_m3ew_file(metadata, image_data, audio_data)
-        m3ew_path = os.path.join(folder_path, f"{title}.m3ew")
-        
-        with open(m3ew_path, 'wb') as f:
-            f.write(m3ew_data)
-        
-        # Upload to Cloudinary
-        cloudinary_url = upload_to_cloudinary(m3ew_path, public_id=title)
-        
-        if cloudinary_url:
-            # Prepare song data for Firestore
-            song_data = {
-                'title': original_title,
-                'artist': info.get("uploader", "Unknown Artist"),
-                'duration': duration_str,
-                'cloudinaryUrl': cloudinary_url,
-                'createdAt': datetime.now(),
-                'source': 'YouTube',
-                'thumbnailUrl': thumbnail_url if thumbnail_url else None,
-                'localPath': m3ew_path,
-                'status': 'completed',
-                'audioType': 'audio/mpeg',
-                'imageType': 'image/png' if image_data else None,
-                'version': 1,
-                'isLive': is_live,
-                'wasLive': was_live
-            }
-            
-            # Add to Firestore
-            firestore_success = add_to_firestore(song_data)
-            
-            return {
-                'success': True,
-                'title': original_title,
-                'artist': info.get("uploader", "Unknown Artist"),
-                'duration': duration_str,
-                'cloudinaryUrl': cloudinary_url,
-                'source': 'YouTube',
-                'thumbnailUrl': thumbnail_url if thumbnail_url else None,
-                'localPath': m3ew_path,
-                'status': 'completed',
-                'audioType': 'audio/mpeg',
-                'imageType': 'image/png' if image_data else None,
-                'version': 1,
-                'isLive': is_live,
-                'wasLive': was_live,
-                'firestoreSuccess': firestore_success
-            }
-        else:
-            return {
-                'success': False,
-                'error': 'Failed to upload to Cloudinary',
-                'localPath': m3ew_path
-            }
 
     except Exception as e:
         return {
@@ -451,11 +260,10 @@ def index():
 
 @app.route('/api/download', methods=['POST'])
 def download_song():
-    """Download a song by name and upload to Cloudinary"""
+    """Download a song by name and return audio and thumbnail data"""
     try:
         data = request.get_json()
         song_name = data.get('song_name', '').strip()
-        folder_path = data.get('folder_path', '').strip()
         
         if not song_name:
             return jsonify({
@@ -463,24 +271,51 @@ def download_song():
                 'message': 'Please provide a song name'
             }), 400
         
-        if not folder_path:
-            folder_path = os.path.expanduser('~/YouTube_Downloads')
+        # Create temporary directory
+        temp_dir = tempfile.mkdtemp()
         
         # Search YouTube for the song
         url = search_youtube_music(song_name)
         
         if not url:
+            shutil.rmtree(temp_dir, ignore_errors=True)
             return jsonify({
                 'success': False,
                 'message': 'No results found for your search'
             }), 404
         
         # Download and process the song
-        result = download_mp3_and_thumbnail(url, song_name, folder_path)
+        result = download_mp3_and_thumbnail(url, song_name, temp_dir)
         
         if result['success']:
-            return jsonify(result)
+            # Read the audio and thumbnail files
+            mp3_path = result['mp3_path']
+            png_path = result.get('png_path')
+            
+            with open(mp3_path, 'rb') as f:
+                audio_data = f.read().hex()
+            
+            image_data = None
+            if png_path and os.path.exists(png_path):
+                with open(png_path, 'rb') as f:
+                    image_data = f.read().hex()
+            
+            # Clean up temp directory
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            
+            return jsonify({
+                'success': True,
+                'title': result['title'],
+                'artist': result['artist'],
+                'duration': result['duration'],
+                'audio_data': audio_data,
+                'image_data': image_data,
+                'audio_type': 'audio/mpeg',
+                'image_type': 'image/png' if image_data else None,
+                'source': 'YouTube'
+            })
         else:
+            shutil.rmtree(temp_dir, ignore_errors=True)
             return jsonify({
                 'success': False,
                 'message': result.get('error', 'Unknown error occurred')
@@ -491,46 +326,12 @@ def download_song():
             'message': f"Server error: {str(e)}"
         }), 500
 
-@app.route('/api/history', methods=['GET'])
-def get_history():
-    """Get download history from Firestore"""
-    try:
-        if not db:
-            return jsonify({
-                'success': False,
-                'message': 'Firestore not initialized',
-                'songs': []
-            }), 500
-        
-        limit = request.args.get('limit', 20, type=int)
-        songs_ref = db.collection('recommendedSongs').order_by('createdAt', direction=firestore.Query.DESCENDING).limit(limit)
-        songs = []
-        
-        for doc in songs_ref.stream():
-            song_data = doc.to_dict()
-            # Convert datetime to string for JSON serialization
-            if 'createdAt' in song_data and hasattr(song_data['createdAt'], 'isoformat'):
-                song_data['createdAt'] = song_data['createdAt'].isoformat()
-            songs.append(song_data)
-        
-        return jsonify({
-            'success': True,
-            'songs': songs
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e),
-            'songs': []
-        }), 500
-
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'timestamp': datetime.now().isoformat(),
-        'firebase_initialized': db is not None
+        'timestamp': time.time()
     })
 
 # For PythonAnywhere
@@ -539,5 +340,3 @@ application = app
 if __name__ == '__main__':
     # Start background tasks if any
     threading.Thread(target=lambda: print("Background task placeholder"), daemon=True).start()
-    
-
