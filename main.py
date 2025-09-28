@@ -537,4 +537,7 @@ def health_check():
 application = app
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Start background tasks if any
+    threading.Thread(target=lambda: print("Background task placeholder"), daemon=True).start()
+    
+
